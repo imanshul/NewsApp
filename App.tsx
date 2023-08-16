@@ -8,11 +8,11 @@
 import React, {useEffect, useState} from 'react';
 import {
     ActivityIndicator,
-    FlatList,
+    FlatList, Image,
     SafeAreaView,
     StatusBar,
     StyleSheet,
-    Text,
+    Text, TouchableOpacity,
     useColorScheme,
     View,
 } from 'react-native';
@@ -22,15 +22,20 @@ import Colors from "./src/constants/Colors";
 import NewsItemView from "./src/components/NewsItemView";
 import {GestureHandlerRootView} from "react-native-gesture-handler";
 import StorageHelper, {StoreKeys} from "./src/utils/StorageHelper";
+import Utils from "./src/utils/Utils";
+import Images from "./src/images/Images";
+import APIConstant from "./src/constants/APIConstant";
 
 function App(): JSX.Element {
     const isDarkMode = useColorScheme() === 'dark';
     const [isRefreshing, setIsRefreshing] = useState(true)
-    const [isLoadingMore, setIsLoadingMore] = useState(false)
-    const [isEndReached, setIsEndReached] = useState(false)
     const [timer, setTimer] = useState(0)
-    const [newsData, setNewsData] = useState(null)
-    let itemToLoad = 10;
+    //to only contain item to display
+    const [newsData, setNewsData] = useState([])
+    //To contain all news
+    const [allNews, setAllNews] = useState([])
+    //mark all cached headline as read
+    const [isAllHeadlinedConsumed, setIsAllHeadlinedConsumed] = useState(false)
     let itemRefs = [];
     let prevOpenedItem;
 
@@ -42,26 +47,74 @@ function App(): JSX.Element {
 
     useEffect(() => {
         SplashScreen.hide();
-
+        console.log('init->')
         refreshData()
-        //setTimeout()
-        // const randomHeadlineInterval = setInterval(() => {
-        //     //setTimer(timer)
-        //     console.log('---Fetch Random 5---', new Date())
-        // }, 10000);
+
+        const randomHeadlineIntervalToDisplay = setInterval(() => {
+            setTimer(prevTimer => prevTimer + 1)
+        }, 1000);
 
         return () => {
             console.log(`clearing interval`);
-            // clearInterval(randomHeadlineInterval);
+            clearInterval(randomHeadlineIntervalToDisplay);
         };
     }, []);
 
+    useEffect(() => {
+        if (timer > 0 && timer % 10 === 0) {
+            // Reset the timer every 10 seconds
+            insertRandomHealdlines(2)
+            setTimer(0);
+        }
+    }, [timer]);
+
+    function insertRandomHealdlines(count) {
+        let displayedPinnedNews = newsData.filter((value) => value && value.pinned)
+        let nonPinnedDisplayedNews = newsData.filter((value) => value && !value.pinned)
+        let unreadElements = Utils.getRandomElementsWithUnread(allNews, count)
+
+        if(unreadElements && unreadElements.length>0){
+            console.log('--randomly inserted elements ---', count)
+        }else{
+            console.log('--randomly inserted elements ---', 0)
+        }
+
+        setNewsData([...displayedPinnedNews, ...unreadElements,...nonPinnedDisplayedNews])
+        //As allnews contains marked read elements, so update in cache
+        updateLocalNewsData(allNews)
+    }
+
+
+    function loadUnReadItem(allNews, itemToLoad = 10) {
+        //All news data found
+        //read top 10 unread news
+        let pinnedNews = allNews.filter((value) => value && value.pinned)
+        let nonPinnedAlreadyReadNews = allNews.filter((value) => !value.pinned && value.read)
+        let nonPinnedNews = allNews.filter((value) => !value.pinned && !value.read)
+        console.log('pinned->', pinnedNews.length, nonPinnedNews.length, 'Non pinned already read->', nonPinnedAlreadyReadNews.length)
+        let readNews = nonPinnedNews.splice(0, Math.min(itemToLoad, nonPinnedNews.length))
+        //Non Pinned Neews becomes leftOver news after slice
+        console.log('read->', readNews.length, ' leftover->', nonPinnedNews.length)
+        //Mark news as read and populate-view
+        let newsMarkedAsRead = readNews.map(obj => ({...obj, read: true}))
+        let newsToDisplay = [...pinnedNews, ...newsMarkedAsRead]
+
+        setNewsData(newsToDisplay)
+        console.log('save length =>', newsToDisplay.length, nonPinnedNews.length, nonPinnedAlreadyReadNews.length)
+        //Save all news without displaying
+        updateLocalNewsData([...newsToDisplay, ...nonPinnedNews, ...nonPinnedAlreadyReadNews])
+
+        if (readNews.length === 0 && nonPinnedNews.length === 0) {
+            console.log('--fetch new page--')
+        }
+
+    }
 
     const refreshData = () => {
         StorageHelper.getObject(StoreKeys.NEWS_KEY).then((value) => {
-            if (value) {
+            if (value && value.length > 0) {
                 console.log('Data Found', value.length)
-                setNewsData(value)
+                loadUnReadItem(value)
                 setIsRefreshing(false)
             } else {
                 console.log('No Data Found')
@@ -71,7 +124,7 @@ function App(): JSX.Element {
     }
 
     const getNewsDataFromServer = () => {
-        fetch('https://newsapi.org/v2/top-headlines?country=in&apiKey=<API_KEY>&pageSize=100', {
+        fetch(APIConstant.TOP_HEADLINE, {
             method: 'GET',
             headers: {
                 Accept: 'application/json',
@@ -80,9 +133,9 @@ function App(): JSX.Element {
         }).then(response => response.json())
             .then(r => {
                 setIsRefreshing(false)
-                setIsLoadingMore(false)
                 if (r.status === 'ok') {
                     updateLocalNewsData(r.articles)
+                    loadUnReadItem(r.articles)
                 } else {
                     console.log('API error-->', r.message)
                 }
@@ -101,19 +154,33 @@ function App(): JSX.Element {
         const tempNewsData = [...newsData]
         let isPinned = tempNewsData[index].pinned
         tempNewsData[index].pinned = !isPinned;
-        updateLocalNewsData(tempNewsData)
+        mergeAndUpdate(tempNewsData)
         closeRow(index + 1)
     }
 
+    const mergeAndUpdate = (newsToUpdate) => {
+        Utils.mergeByProperty(allNews, newsToUpdate, 'title')
+        setNewsData(newsToUpdate)
+        updateLocalNewsData(allNews)
+    }
+
     const onRemoveView = (index) => {
+        //Remove Item from all News
+        let itemToRemove = newsData[index]
+        let item = allNews.find((item) => item.title === itemToRemove.title)
+        let indexToRemove = allNews.indexOf(item)
+        //Remove item from displayedNews
         const tempNewsData = [...newsData]
         tempNewsData.splice(index, 1)
-        updateLocalNewsData(tempNewsData)
+        allNews.splice(indexToRemove, 1)
+        //Update states/storage
+        setNewsData(tempNewsData)
+        updateLocalNewsData(allNews)
         closeRow(index + 1)
     }
 
     const updateLocalNewsData = (newsData) => {
-        setNewsData(newsData)
+        setAllNews(newsData)
         StorageHelper.saveObject(StoreKeys.NEWS_KEY, newsData)
     }
 
@@ -123,8 +190,20 @@ function App(): JSX.Element {
                 barStyle={isDarkMode ? 'light-content' : 'dark-content'}
                 backgroundColor={backgroundStyle.backgroundColor}
             />
-            <View style={[{backgroundColor: Colors.primary, padding: 12}]}>
+            <View style={[{
+                backgroundColor: Colors.primary,
+                padding: 12,
+                flexDirection: 'row',
+                justifyContent: 'space-between'
+            }]}>
                 <Text style={{color: Colors.white, fontWeight: 'bold'}}>Taza Khabar</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                    <Text style={{fontWeight: 'bold', color: 'white'}}>{timer}</Text>
+                    <TouchableOpacity style={{marginStart: 8}} onPress={() => setTimer(0)}>
+                        <Image source={Images.RefreshIcon} style={{height: 20, width: 20}} resizeMode={'contain'}/>
+                    </TouchableOpacity>
+                </View>
+
             </View>
             <GestureHandlerRootView style={{flex: 1, backgroundColor: isDarkMode ? Colors.dark : Colors.light}}>
                 <FlatList data={newsData}
@@ -137,50 +216,18 @@ function App(): JSX.Element {
                                   onRemoveView={onRemoveView}
                                   closeRow={closeRow}
                               />)}
-                          keyExtractor={(item, index) => item.title.toString()}
+                          keyExtractor={(item, index) => (item.title + '_' + index).toString()}
                           refreshing={isRefreshing}
                           onRefresh={() => {
                               if (!isRefreshing) {
                                   refreshData()
                               }
                           }}
-                          onEndReachedThreshold={0.8}
-                          onEndReached={() => {
-                              if (!isEndReached && !isLoadingMore) {
-                                  console.log("--End Reached--");
-                                  setIsLoadingMore(true)
-                              }
-                          }}
-                          ListFooterComponent={() => (isLoadingMore ?
-                              <ActivityIndicator
-                                  color={Colors.primary}
-                                  style={{margin: 16}}/>
-                              : null)
-                          }
                           extraData={newsData}
                 />
             </GestureHandlerRootView>
         </SafeAreaView>
     );
 }
-
-const styles = StyleSheet.create({
-    sectionContainer: {
-        marginTop: 32,
-        paddingHorizontal: 24,
-    },
-    sectionTitle: {
-        fontSize: 24,
-        fontWeight: '600',
-    },
-    sectionDescription: {
-        marginTop: 8,
-        fontSize: 18,
-        fontWeight: '400',
-    },
-    highlight: {
-        fontWeight: '700',
-    },
-});
 
 export default App;
