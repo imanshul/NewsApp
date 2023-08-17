@@ -88,6 +88,12 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            storeFile file('../certificates/certificate.jks')
+            keyAlias 'key0'
+            keyPassword 'meat2023'
+            storePassword 'meat2023'
+        }
     }
     buildTypes {
         debug {
