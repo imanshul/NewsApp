@@ -38,7 +38,7 @@ function App(): JSX.Element {
     const [isAllHeadlinedConsumed, setIsAllHeadlinedConsumed] = useState(false)
     let itemRefs = [];
     let prevOpenedItem;
-
+    let currentPage = 1
 
     const backgroundStyle = {
         backgroundColor: isDarkMode ? Colors.darker : Colors.primary,
@@ -73,10 +73,11 @@ function App(): JSX.Element {
         let nonPinnedDisplayedNews = newsData.filter((value) => value && !value.pinned)
         let unreadElements = Utils.getRandomElementsWithUnread(allNews, count)
 
-        if(unreadElements && unreadElements.length>0){
+        if (unreadElements && unreadElements.length > 0) {
             console.log('--randomly inserted elements ---', count)
-        }else{
+        } else {
             console.log('--randomly inserted elements ---', 0)
+            getNewsDataFromServer(currentPage +1)
         }
 
         setNewsData([...displayedPinnedNews, ...unreadElements,...nonPinnedDisplayedNews])
@@ -91,21 +92,22 @@ function App(): JSX.Element {
         let pinnedNews = allNews.filter((value) => value && value.pinned)
         let nonPinnedAlreadyReadNews = allNews.filter((value) => !value.pinned && value.read)
         let nonPinnedNews = allNews.filter((value) => !value.pinned && !value.read)
-        console.log('pinned->', pinnedNews.length, nonPinnedNews.length, 'Non pinned already read->', nonPinnedAlreadyReadNews.length)
+        console.log('pinned->', pinnedNews.length, 'non Pinned & non-read ->', nonPinnedNews.length, 'Non pinned already read->', nonPinnedAlreadyReadNews.length)
         let readNews = nonPinnedNews.splice(0, Math.min(itemToLoad, nonPinnedNews.length))
         //Non Pinned Neews becomes leftOver news after slice
-        console.log('read->', readNews.length, ' leftover->', nonPinnedNews.length)
+        console.log('read now->', readNews.length, ' leftover->', nonPinnedNews.length)
         //Mark news as read and populate-view
         let newsMarkedAsRead = readNews.map(obj => ({...obj, read: true}))
         let newsToDisplay = [...pinnedNews, ...newsMarkedAsRead]
 
         setNewsData(newsToDisplay)
-        console.log('save length =>', newsToDisplay.length, nonPinnedNews.length, nonPinnedAlreadyReadNews.length)
+        //console.log('save length =>', newsToDisplay.length, nonPinnedNews.length, nonPinnedAlreadyReadNews.length)
         //Save all news without displaying
         updateLocalNewsData([...newsToDisplay, ...nonPinnedNews, ...nonPinnedAlreadyReadNews])
 
         if (readNews.length === 0 && nonPinnedNews.length === 0) {
-            console.log('--fetch new page--')
+            console.log('--fetch new page from Network--')
+            getNewsDataFromServer(currentPage + 1)
         }
 
     }
@@ -113,18 +115,19 @@ function App(): JSX.Element {
     const refreshData = () => {
         StorageHelper.getObject(StoreKeys.NEWS_KEY).then((value) => {
             if (value && value.length > 0) {
-                console.log('Data Found', value.length)
+                console.log('Cached Data Found', value.length)
                 loadUnReadItem(value)
                 setIsRefreshing(false)
             } else {
-                console.log('No Data Found')
-                getNewsDataFromServer()
+                console.log('No Cached Data Found')
+                getNewsDataFromServer(currentPage)
             }
         })
     }
 
-    const getNewsDataFromServer = () => {
-        fetch(APIConstant.TOP_HEADLINE, {
+    const getNewsDataFromServer = (page) => {
+        console.log('--Fetching from network-- page->', page)
+        fetch(APIConstant.topHeadline(page), {
             method: 'GET',
             headers: {
                 Accept: 'application/json',
@@ -134,12 +137,19 @@ function App(): JSX.Element {
             .then(r => {
                 setIsRefreshing(false)
                 if (r.status === 'ok') {
-                    updateLocalNewsData(r.articles)
-                    loadUnReadItem(r.articles)
+                    console.log('API returned results-->', r.articles.length)
+                    if (allNews && allNews.length > 0) {
+                        console.log('---reset cache---')
+                        let pinnedNews = allNews.filter((value) => value && value.pinned)
+                        loadUnReadItem([...pinnedNews, ...r.articles])
+                       console.log('--do--')
+                    } else {
+                        //updateLocalNewsData(r.articles)
+                        loadUnReadItem(r.articles)
+                    }
                 } else {
                     console.log('API error-->', r.message)
                 }
-                console.log('response-->', r)
             }).catch(error => console.log('API failed-->', error));
     }
 

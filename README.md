@@ -68,3 +68,8 @@ To do this:
 7. Testing:
     * Test the app to ensure all functionalities work as expected.
     * Document any assumptions made and provide clear instructions on how to run the app.
+
+
+##What you need?
+
+You need to have API key from newsapi in order to run the project, once API key is generated you can replace <API_KEY> in APIConstant.ts file and run the app.
